@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.csv
+*.pdf
+.DS_Store
+.vscode/
+frontend/default-keys.local.js

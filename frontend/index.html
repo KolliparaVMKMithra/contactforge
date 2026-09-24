@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ContactForge — HR & Leadership Contacts</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="topbar-main">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">ContactForge</span>
+      </div>
+      <p class="brand-tag">HR · Talent Acquisition · Leadership — via Hunter.io</p>
+    </div>
+    <button type="button" id="logout-btn" class="btn-secondary btn-logout">Sign out</button>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <h1>Find HR & leadership contacts</h1>
+      <p class="lede">
+        Targets HR managers, talent acquisition, recruiters, founders, CEO/CTO, and senior people-team roles.
+        Hunter.io keys rotate automatically when a daily limit is reached — no interruption to your search.
+      </p>
+
+      <form id="search-form" class="search-form" autocomplete="off" method="post" action="#">
+        <label class="sr-only" for="company">Company name</label>
+        <div class="search-row">
+          <input
+            id="company"
+            name="company"
+            type="text"
+            placeholder="e.g. Google, Infosys, Stripe…"
+            required
+            maxlength="200"
+          />
+          <button type="submit" id="search-btn">
+            <span class="btn-label">Search HR contacts</span>
+            <span class="btn-spinner" hidden></span>
+          </button>
+        </div>
+        <div class="search-meta">
+          <label class="max-label">
+            Max results
+            <input id="max-results" type="number" min="1" max="200" value="50" />
+          </label>
+          <span class="hint">HR/TA first · falls back to other company employees if HR emails are scarce</span>
+        </div>
+      </form>
+    </section>
+
+    <section id="status" class="status" hidden></section>
+
+    <section id="summary" class="summary" hidden>
+      <div class="summary-main">
+        <h2 id="summary-company"></h2>
+        <p id="summary-message"></p>
+      </div>
+      <div class="summary-stats">
+        <div class="stat">
+          <span class="stat-value" id="stat-count">0</span>
+          <span class="stat-label">Contacts</span>
+        </div>
+        <div class="stat domain-stat">
+          <span class="stat-value" id="stat-domain">—</span>
+          <span class="stat-label">Domain</span>
+        </div>
+      </div>
+      <div class="summary-actions">
+        <a id="website-link" href="#" target="_blank" rel="noopener" hidden>Open website</a>
+        <button type="button" id="export-excel" class="btn-download" hidden>Download Excel</button>
+      </div>
+    </section>
+
+    <section id="results" class="results" hidden>
+      <div class="results-head">
+        <h3>HR & leadership contacts</h3>
+        <div class="results-actions">
+          <input id="filter" type="search" placeholder="Filter by name, email, title…" />
+          <button type="button" id="export-excel-results" class="btn-download" hidden>Download Excel</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Company</th>
+              <th>Email</th>
+              <th>Designation</th>
+              <th>Confidence</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+      <p id="empty-filter" class="empty" hidden>No rows match your filter.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Use contact data responsibly and in line with applicable privacy laws and Hunter.io terms.</p>
+  </footer>
+
+  <aside class="api-dock" id="api-dock" aria-label="Hunter API key manager">
+    <div class="api-dock-bar">
+      <div class="api-dock-left">
+        <span class="api-dock-title">Hunter API</span>
+        <label class="sr-only" for="key-dropdown">Select API key</label>
+        <select id="key-dropdown" class="key-dropdown" title="All saved Hunter API keys"></select>
+        <span id="dock-key-count" class="dock-key-count">0 keys</span>
+      </div>
+
+      <div class="api-dock-center">
+        <div class="live-credits live-credits--loading" id="live-credits" aria-live="polite">
+          <span class="live-credits-dot" aria-hidden="true"></span>
+          <span id="live-credits-text">Checking live credits…</span>
+        </div>
+        <p id="dock-rotation-note" class="dock-rotation-note" hidden></p>
+      </div>
+
+      <div class="api-dock-right">
+        <button type="button" id="check-keys-btn" class="btn-secondary btn-dock">Refresh</button>
+        <button type="button" id="dock-toggle-btn" class="btn-secondary btn-dock" aria-expanded="false" aria-controls="api-dock-panel">
+          Manage keys
+        </button>
+      </div>
+    </div>
+
+    <div class="api-dock-panel" id="api-dock-panel" hidden>
+      <div class="api-dock-panel-grid">
+        <form id="add-key-form" class="add-key-form" autocomplete="off">
+          <input
+            id="new-key-input"
+            type="password"
+            placeholder="Paste one Hunter API key…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <input id="new-key-label" type="text" placeholder="Label (optional)" maxlength="40" />
+          <button type="submit" class="btn-secondary">Add key</button>
+        </form>
+
+        <form id="bulk-key-form" class="bulk-key-form" autocomplete="off">
+          <label for="bulk-keys-input">Bulk import (one key per line)</label>
+          <textarea
+            id="bulk-keys-input"
+            rows="4"
+            placeholder="Paste multiple Hunter API keys here, one per line…"
+            spellcheck="false"
+          ></textarea>
+          <button type="submit" class="btn-secondary">Import keys</button>
+        </form>
+      </div>
+      <p class="keys-note">
+        Keys are stored in your browser only (not on the server). Limits reset daily. When the active key hits its limit, the next available key is used automatically.
+      </p>
+    </div>
+  </aside>
+
+  <script src="/static/default-keys.js"></script>
+  <script src="/static/default-keys.local.js" onerror="void 0"></script>
+  <script src="/static/keys.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
