@@ -9,6 +9,8 @@ COPY backend ./backend
 COPY frontend ./frontend
 COPY run.py Procfile render.yaml runtime.txt ./
 
+RUN mkdir -p /app/data/hunter_keys
+
 ENV PORT=8080
 ENV RENDER=true
 

@@ -5,32 +5,106 @@ const CREDITS_POLL_MS = 30000;
 
 let creditsPollTimer = null;
 let isCheckingCredits = false;
+let keyStoreCache = { keys: [], activeKeyId: null };
+let saveTimer = null;
+let keysReadyPromise = null;
 
 function uid() {
   return "k_" + Math.random().toString(36).slice(2, 11);
 }
 
-function loadKeyStore() {
+function normalizeStore(store) {
+  const keys = Array.isArray(store?.keys) ? store.keys : [];
+  return {
+    keys,
+    activeKeyId: store?.activeKeyId || keys[0]?.id || null,
+  };
+}
+
+function loadLocalKeyStoreOnly() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const data = JSON.parse(raw);
-      if (Array.isArray(data.keys)) return data;
+      if (Array.isArray(data.keys)) return normalizeStore(data);
     }
     const legacy = localStorage.getItem("contactforge_hunter_keys_v1");
     if (legacy) {
       const data = JSON.parse(legacy);
-      if (Array.isArray(data.keys)) {
-        saveKeyStore(data);
-        return data;
-      }
+      if (Array.isArray(data.keys)) return normalizeStore(data);
     }
   } catch (_) {}
   return { keys: [], activeKeyId: null };
 }
 
+function loadKeyStore() {
+  return keyStoreCache;
+}
+
+async function persistKeyStoreToServer(store) {
+  keyStoreCache = normalizeStore(store);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(keyStoreCache));
+  try {
+    const res = await fetch("/api/hunter/keys", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(keyStoreCache),
+    });
+    if (res.status === 401) {
+      window.location.href = "/login";
+      return false;
+    }
+    return res.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 function saveKeyStore(store) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  keyStoreCache = normalizeStore(store);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(keyStoreCache));
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    persistKeyStoreToServer(keyStoreCache);
+  }, 400);
+}
+
+async function flushKeyStore() {
+  clearTimeout(saveTimer);
+  return persistKeyStoreToServer(keyStoreCache);
+}
+
+async function syncKeysFromServer() {
+  try {
+    const res = await fetch("/api/hunter/keys", { credentials: "same-origin" });
+    if (res.status === 401) {
+      window.location.href = "/login";
+      return false;
+    }
+    if (!res.ok) return false;
+
+    const server = normalizeStore(await res.json());
+    if (server.keys.length) {
+      keyStoreCache = server;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(keyStoreCache));
+      return true;
+    }
+
+    const local = loadLocalKeyStoreOnly();
+    if (local.keys.length) {
+      keyStoreCache = local;
+      await flushKeyStore();
+      return true;
+    }
+
+    keyStoreCache = server;
+    return true;
+  } catch (_) {
+    const local = loadLocalKeyStoreOnly();
+    if (local.keys.length) keyStoreCache = local;
+    return false;
+  }
 }
 
 function maskKey(key) {
@@ -253,6 +327,8 @@ function seedDefaultKeys() {
   if (!defaults.length) return 0;
 
   const store = loadKeyStore();
+  if (store.keys.length) return 0;
+
   let added = 0;
   for (const key of defaults) {
     const trimmed = String(key).trim();
@@ -397,6 +473,7 @@ async function checkAllKeys({ silent = false } = {}) {
     if (!res.ok) throw new Error(data.detail || "Check failed");
 
     applyKeyInfoToStore(store, data.keys);
+    await flushKeyStore();
     updateLiveCreditsDisplay();
     return data;
   } catch (err) {
@@ -438,7 +515,7 @@ function bindDockControls() {
     document.body.classList.toggle("dock-expanded", open);
   });
 
-  document.getElementById("add-key-form")?.addEventListener("submit", (e) => {
+  document.getElementById("add-key-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const keyInput = document.getElementById("new-key-input");
     const labelInput = document.getElementById("new-key-label");
@@ -448,17 +525,19 @@ function bindDockControls() {
     if (addKey(key, label)) {
       keyInput.value = "";
       if (labelInput) labelInput.value = "";
+      await flushKeyStore();
       checkAllKeys({ silent: true });
     }
   });
 
-  document.getElementById("bulk-key-form")?.addEventListener("submit", (e) => {
+  document.getElementById("bulk-key-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const textarea = document.getElementById("bulk-keys-input");
     const added = bulkAddKeys(textarea?.value || "");
     if (textarea) textarea.value = "";
     if (added > 0) {
-      setDockRotationNote(`Imported ${added} API key${added === 1 ? "" : "s"}`);
+      await flushKeyStore();
+      setDockRotationNote(`Imported ${added} API key${added === 1 ? "" : "s"} — synced to your account`);
       checkAllKeys({ silent: true });
       setTimeout(() => setDockRotationNote(""), 4000);
     } else {
@@ -472,23 +551,41 @@ function bindDockControls() {
   });
 }
 
-function initKeys() {
-  const seeded = seedDefaultKeys();
+async function initKeys() {
   bindDockControls();
-  updateLiveCreditsDisplay();
-  if (seeded > 0) {
-    setDockRotationNote(`Loaded ${seeded} API keys — checking live daily limits…`);
+  setDockRotationNote("Loading your API keys…");
+
+  await syncKeysFromServer();
+
+  if (!keyStoreCache.keys.length) {
+    const seeded = seedDefaultKeys();
+    if (seeded > 0) {
+      await flushKeyStore();
+      setDockRotationNote(`Loaded ${seeded} API keys — checking live daily limits…`);
+    } else {
+      setDockRotationNote("");
+    }
+  } else {
+    setDockRotationNote("");
   }
-  checkAllKeys({ silent: true }).then(() => {
-    if (seeded > 0) setTimeout(() => setDockRotationNote(""), 5000);
-  });
+
+  updateLiveCreditsDisplay();
+  await checkAllKeys({ silent: true });
   startCreditsPolling();
+  return true;
+}
+
+function whenKeysReady() {
+  if (!keysReadyPromise) keysReadyPromise = initKeys();
+  return keysReadyPromise;
 }
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initKeys);
+  document.addEventListener("DOMContentLoaded", () => {
+    keysReadyPromise = initKeys();
+  });
 } else {
-  initKeys();
+  keysReadyPromise = initKeys();
 }
 
 window.ContactForgeKeys = {
@@ -501,4 +598,6 @@ window.ContactForgeKeys = {
   updateLiveCreditsDisplay,
   startCreditsPolling,
   bulkAddKeys,
+  whenReady: whenKeysReady,
+  flushKeyStore,
 };

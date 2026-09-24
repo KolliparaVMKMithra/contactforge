@@ -10,3 +10,4 @@ venv/
 .DS_Store
 .vscode/
 frontend/default-keys.local.js
+data/

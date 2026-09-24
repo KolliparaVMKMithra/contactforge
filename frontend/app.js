@@ -181,6 +181,8 @@ async function runSearch() {
   const company = companyInput?.value.trim();
   if (!company) return;
 
+  await window.ContactForgeKeys?.whenReady?.();
+
   const store = window.ContactForgeKeys?.loadKeyStore() || { keys: [] };
   const keys = window.ContactForgeKeys?.getKeyList(store) || [];
   const activeIndex = window.ContactForgeKeys?.getActiveKeyIndex(store) || 0;

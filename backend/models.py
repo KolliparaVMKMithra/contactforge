@@ -49,6 +49,11 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=200)
 
 
+class KeyStorePayload(BaseModel):
+    keys: list[dict] = Field(default_factory=list)
+    activeKeyId: Optional[str] = None
+
+
 class SearchResponse(BaseModel):
     company_name: str
     domain: Optional[str] = None

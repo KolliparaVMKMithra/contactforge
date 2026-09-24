@@ -13,7 +13,8 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import AUTH_SECRET_KEY, is_public_path, verify_credentials
 from .enrichment import check_hunter_keys, enrichment_status
-from .models import CheckKeysRequest, LoginRequest, SearchRequest, SearchResponse
+from .key_store import load_user_keys, save_user_keys
+from .models import CheckKeysRequest, KeyStorePayload, LoginRequest, SearchRequest, SearchResponse
 from .scraper import find_employee_contacts
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,6 +86,26 @@ async def auth_me(request: Request):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", **enrichment_status()}
+
+
+@app.get("/api/hunter/keys")
+async def get_saved_keys(request: Request):
+    email = request.session.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return load_user_keys(email)
+
+
+@app.put("/api/hunter/keys")
+async def put_saved_keys(payload: KeyStorePayload, request: Request):
+    email = request.session.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        saved = save_user_keys(email, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **saved}
 
 
 @app.post("/api/hunter/check-keys")
