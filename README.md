@@ -25,17 +25,40 @@ For local dev you can also copy `frontend/default-keys.example.js` to `frontend/
 
 ## Deploy on Render
 
-### Step 1 — Push to GitHub
-
 Repo: https://github.com/KolliparaVMKMithra/contactforge
 
-### Step 2 — Create a Render Web Service
+### Option A — Public Git URL (no GitHub app; use this if Connect keeps redirecting)
+
+1. Go to [https://dashboard.render.com](https://dashboard.render.com)
+2. Click **New +** → **Web Service**
+3. At the top, click the **Public Git repository** tab (not GitHub)
+4. Paste this URL exactly:
+   ```
+   https://github.com/KolliparaVMKMithra/contactforge
+   ```
+5. Click **Continue**
+6. Use the settings below, add env vars, then **Create Web Service**
+
+### Option B — Blueprint (one-click from `render.yaml`)
+
+1. Go to [https://dashboard.render.com/blueprints](https://dashboard.render.com/blueprints)
+2. Click **New Blueprint Instance**
+3. Paste: `https://github.com/KolliparaVMKMithra/contactforge`
+4. Render reads `render.yaml` automatically — enter `AUTH_EMAIL` and `AUTH_PASSWORD` when prompted
+5. Click **Apply**
+
+### Option C — Railway (alternative host)
+
+1. Go to [https://railway.app](https://railway.app) → sign in with GitHub
+2. **New Project** → **Deploy from GitHub repo** → select `contactforge`
+3. Add variables: `AUTH_EMAIL`, `AUTH_PASSWORD`, `AUTH_SECRET_KEY`, `RENDER=true`
+4. Railway auto-uses the `Dockerfile` — open the generated URL
+
+### Render manual settings (Options A & B)
 
 1. Go to [https://dashboard.render.com](https://dashboard.render.com) and sign in
-2. Click **New +** → **Web Service**
-3. Connect your GitHub account if needed
-4. Select repository **KolliparaVMKMithra/contactforge**
-5. Use these settings:
+2. Create the service using Option A or B above
+3. Use these settings if not using Blueprint:
 
 | Setting | Value |
 |---------|--------|
