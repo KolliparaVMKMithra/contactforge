@@ -14,7 +14,16 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import AUTH_SECRET_KEY, is_public_path, verify_credentials
 from .enrichment import _env_hunter_keys, check_hunter_keys, enrichment_status
 from .key_store import load_user_keys, save_user_keys
-from .models import CheckKeysRequest, KeyStorePayload, LoginRequest, SearchRequest, SearchResponse
+from .models import (
+    CandidateResolveRequest,
+    CandidateResolveResponse,
+    CheckKeysRequest,
+    KeyStorePayload,
+    LoginRequest,
+    SearchRequest,
+    SearchResponse,
+)
+from .resolver import search_company_candidates
 from .scraper import find_employee_contacts
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +129,18 @@ async def api_check_keys(req: CheckKeysRequest):
     return {"keys": results}
 
 
+@app.post("/api/company/candidates", response_model=CandidateResolveResponse)
+async def get_company_candidates(req: CandidateResolveRequest):
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
+    try:
+        candidates = await asyncio.wait_for(search_company_candidates(query), timeout=25.0)
+    except asyncio.TimeoutError:
+        candidates = []
+    return CandidateResolveResponse(query=query, candidates=candidates)
+
+
 @app.post("/api/search", response_model=SearchResponse)
 async def search(req: SearchRequest, request: Request):
     name = req.company_name.strip()
@@ -160,6 +181,7 @@ async def search(req: SearchRequest, request: Request):
                 hunter_api_keys=combined_keys,
                 active_key_index=req.active_key_index,
                 key_states=key_states,
+                target_domain=req.domain,
             ),
             timeout=120.0,
         )

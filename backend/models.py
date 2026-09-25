@@ -32,8 +32,27 @@ class KeyStateInput(BaseModel):
     status: Optional[str] = None
 
 
+class CompanyCandidate(BaseModel):
+    company_name: str
+    domain: str
+    website: str
+    logo: Optional[str] = None
+    description: Optional[str] = None
+    source: Optional[str] = None
+
+
+class CandidateResolveRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=200)
+
+
+class CandidateResolveResponse(BaseModel):
+    query: str
+    candidates: list[CompanyCandidate]
+
+
 class SearchRequest(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=200)
+    domain: Optional[str] = None
     max_results: int = Field(default=100, ge=1, le=500)
     hunter_api_keys: list[str] = Field(default_factory=list)
     active_key_index: int = Field(default=0, ge=0)

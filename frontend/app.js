@@ -13,6 +13,9 @@ let emptyFilter;
 let exportBtn;
 let exportBtnResults;
 let websiteLink;
+let candidatesSection;
+let candidatesQueryEl;
+let candidatesGrid;
 
 let latestContacts = [];
 let latestCompany = "";
@@ -46,6 +49,10 @@ function showStatus(message, type = "loading") {
 
 function hideStatus() {
   if (statusEl) statusEl.hidden = true;
+}
+
+function hideCandidates() {
+  if (candidatesSection) candidatesSection.hidden = true;
 }
 
 function escapeHtml(value) {
@@ -177,28 +184,91 @@ function bindExport(btn) {
   btn.addEventListener("click", () => downloadExcel(latestContacts));
 }
 
-async function runSearch() {
-  const company = companyInput?.value.trim();
-  if (!company) return;
+async function resolveCompanyCandidates(query) {
+  setLoading(true);
+  hideCandidates();
+  if (summaryEl) summaryEl.hidden = true;
+  if (resultsEl) resultsEl.hidden = true;
+  showStatus(`Searching Google & web for companies matching "${query}"…`, "loading");
+
+  try {
+    const res = await fetch("/api/company/candidates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ query }),
+    });
+
+    if (handleUnauthorized(res)) return [];
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    return data.candidates || [];
+  } catch (_) {
+    return [];
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderCandidates(query, candidates) {
+  if (!candidatesSection || !candidatesGrid) return;
+
+  if (candidatesQueryEl) candidatesQueryEl.textContent = query;
+  candidatesSection.hidden = false;
+
+  candidatesGrid.innerHTML = candidates
+    .map((c, i) => {
+      const logoUrl = c.logo || `https://www.google.com/s2/favicons?domain=${c.domain}&sz=128`;
+      return `
+        <div class="candidate-card">
+          <div class="candidate-card-header">
+            <img
+              src="${escapeHtml(logoUrl)}"
+              alt="${escapeHtml(c.company_name)} logo"
+              class="candidate-logo"
+              onerror="this.onerror=null; this.src='https://www.google.com/s2/favicons?domain=${escapeHtml(c.domain)}&sz=128';"
+            />
+            <div class="candidate-card-info">
+              <h4 class="candidate-name">${escapeHtml(c.company_name)}</h4>
+              <a href="${escapeHtml(c.website)}" target="_blank" rel="noopener" class="candidate-domain">${escapeHtml(c.domain)} ↗</a>
+            </div>
+          </div>
+          <p class="candidate-desc">${escapeHtml(c.description || "Company web presence")}</p>
+          <button type="button" class="btn-select-candidate" data-index="${i}">
+            <span>Find HR Contacts</span>
+            <span class="arrow">→</span>
+          </button>
+        </div>
+      `;
+    })
+    .join("");
+
+  candidatesGrid.querySelectorAll(".btn-select-candidate").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.getAttribute("data-index"));
+      const selected = candidates[idx];
+      if (selected) {
+        fetchHRContactsForCompany(selected.company_name, selected.domain);
+      }
+    });
+  });
+}
+
+async function fetchHRContactsForCompany(companyName, targetDomain) {
+  hideCandidates();
+  setLoading(true);
+  if (summaryEl) summaryEl.hidden = true;
+  if (resultsEl) resultsEl.hidden = true;
+
+  const domainLabel = targetDomain ? ` (${targetDomain})` : "";
+  showStatus(`Fetching HR & leadership contacts for ${companyName}${domainLabel} via Hunter.io…`, "loading");
 
   await window.ContactForgeKeys?.whenReady?.();
-
   const store = window.ContactForgeKeys?.loadKeyStore() || { keys: [] };
   const keys = window.ContactForgeKeys?.getKeyList(store) || [];
   const activeIndex = window.ContactForgeKeys?.getActiveKeyIndex(store) || 0;
   const keyStates = window.ContactForgeKeys?.getKeyStatesForRequest(store) || [];
-
-  if (!keys.length) {
-    showStatus("Add at least one Hunter.io API key in Manage keys at the bottom.", "error");
-    const panel = document.getElementById("api-dock-panel");
-    if (panel) panel.hidden = false;
-    return;
-  }
-
-  setLoading(true);
-  if (summaryEl) summaryEl.hidden = true;
-  if (resultsEl) resultsEl.hidden = true;
-  showStatus("Searching HR, talent acquisition & leadership contacts via Hunter.io…", "loading");
 
   try {
     const res = await fetch("/api/search", {
@@ -206,7 +276,8 @@ async function runSearch() {
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        company_name: company,
+        company_name: companyName,
+        domain: targetDomain || null,
         max_results: Number(maxInput?.value) || 50,
         hunter_api_keys: keys,
         active_key_index: activeIndex,
@@ -222,19 +293,45 @@ async function runSearch() {
     }
 
     latestContacts = data.contacts || [];
-    latestCompany = data.company_name || company;
+    latestCompany = data.company_name || companyName;
     hideStatus();
     renderSummary(data);
     renderRows(latestContacts);
     window.ContactForgeKeys?.checkAllKeys?.({ silent: true });
 
     if (!latestContacts.length) {
-      showStatus(data.message || "No HR contacts found.", "error");
+      showStatus(data.message || "No HR contacts found for this company.", "error");
     }
   } catch (err) {
     showStatus(err.message || "Something went wrong.", "error");
   } finally {
     setLoading(false);
+  }
+}
+
+async function handleSearchSubmit() {
+  const company = companyInput?.value.trim();
+  if (!company) return;
+
+  await window.ContactForgeKeys?.whenReady?.();
+
+  const store = window.ContactForgeKeys?.loadKeyStore() || { keys: [] };
+  const keys = window.ContactForgeKeys?.getKeyList(store) || [];
+
+  if (!keys.length) {
+    showStatus("Add at least one Hunter.io API key in Manage keys at the bottom.", "error");
+    const panel = document.getElementById("api-dock-panel");
+    if (panel) panel.hidden = false;
+    return;
+  }
+
+  const candidates = await resolveCompanyCandidates(company);
+  if (candidates && candidates.length > 0) {
+    hideStatus();
+    renderCandidates(company, candidates);
+  } else {
+    // If no candidates found from web search, run direct search
+    fetchHRContactsForCompany(company, null);
   }
 }
 
@@ -254,6 +351,9 @@ function initApp() {
   exportBtn = document.getElementById("export-excel");
   exportBtnResults = document.getElementById("export-excel-results");
   websiteLink = document.getElementById("website-link");
+  candidatesSection = document.getElementById("company-candidates");
+  candidatesQueryEl = document.getElementById("candidates-query");
+  candidatesGrid = document.getElementById("candidates-grid");
 
   if (!form || !companyInput) {
     console.error("ContactForge: search form not found");
@@ -282,13 +382,13 @@ function initApp() {
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    runSearch();
+    handleSearchSubmit();
   });
 
   companyInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      runSearch();
+      handleSearchSubmit();
     }
   });
 }

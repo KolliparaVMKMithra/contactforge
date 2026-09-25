@@ -33,6 +33,128 @@ def _normalize_domain(url_or_domain: str) -> Optional[str]:
     return host
 
 
+def _clean_title(title: str) -> str:
+    cleaned = re.sub(r"\s*[-|•·]\s*(Official Website|LinkedIn|Home|Overview|Contact|About).*$", "", title, flags=re.I).strip()
+    return cleaned or title
+
+
+async def search_company_candidates(query: str) -> list[dict]:
+    name = query.strip()
+    if not name:
+        return []
+
+    candidates: list[dict] = []
+    seen_domains: set[str] = set()
+
+    # Direct domain check (e.g. user typed "snabbit.com")
+    direct_domain = _normalize_domain(name)
+    if direct_domain and "." in name:
+        company_label = name.split(".")[0].capitalize()
+        candidates.append({
+            "company_name": company_label,
+            "domain": direct_domain,
+            "website": f"https://{direct_domain}",
+            "logo": f"https://www.google.com/s2/favicons?domain={direct_domain}&sz=128",
+            "description": f"Direct domain for {direct_domain}",
+            "source": "direct",
+        })
+        seen_domains.add(direct_domain)
+
+    # 1) Clearbit autocomplete API (public, free)
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": USER_AGENT}) as client:
+            resp = await client.get(
+                "https://autocomplete.clearbit.com/v1/companies/suggest",
+                params={"query": name},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                    for item in data[:6]:
+                        dom = _normalize_domain(item.get("domain") or "")
+                        if dom and dom not in seen_domains:
+                            seen_domains.add(dom)
+                            logo = item.get("logo") or f"https://www.google.com/s2/favicons?domain={dom}&sz=128"
+                            candidates.append({
+                                "company_name": item.get("name") or name.title(),
+                                "domain": dom,
+                                "website": f"https://{dom}",
+                                "logo": logo,
+                                "description": f"Verified company domain on Clearbit ({dom})",
+                                "source": "clearbit",
+                            })
+    except Exception:
+        pass
+
+    # 2) Web Search for Official Sites & LinkedIn Company Profiles
+    skip_domains = (
+        "linkedin.com",
+        "facebook.com",
+        "twitter.com",
+        "x.com",
+        "instagram.com",
+        "youtube.com",
+        "crunchbase.com",
+        "bloomberg.com",
+        "wikipedia.org",
+        "glassdoor.com",
+        "indeed.com",
+        "zoominfo.com",
+        "apollo.io",
+        "rocketreach.co",
+        "yelp.com",
+        "github.com",
+    )
+
+    try:
+        with DDGS() as ddgs:
+            web_hits = list(ddgs.text(f"{name} company official website", max_results=10))
+            for hit in web_hits:
+                href = hit.get("href") or hit.get("link") or ""
+                dom = _normalize_domain(href)
+                if not dom or dom in seen_domains:
+                    continue
+                if any(s in dom for s in skip_domains):
+                    continue
+
+                title = _clean_title(hit.get("title") or name.title())
+                snippet = hit.get("body") or hit.get("snippet") or f"Official website: {dom}"
+                seen_domains.add(dom)
+                candidates.append({
+                    "company_name": title,
+                    "domain": dom,
+                    "website": f"https://{dom}",
+                    "logo": f"https://www.google.com/s2/favicons?domain={dom}&sz=128",
+                    "description": snippet[:180],
+                    "source": "duckduckgo",
+                })
+
+            li_hits = list(ddgs.text(f"{name} site:linkedin.com/company", max_results=5))
+            for hit in li_hits:
+                href = hit.get("href") or hit.get("link") or ""
+                title = hit.get("title") or ""
+                snippet = hit.get("body") or hit.get("snippet") or ""
+                if "linkedin.com/company" in href.lower():
+                    comp_name = re.sub(r"[-|:•·]\s*LinkedIn.*$", "", title, flags=re.I).strip()
+                    comp_name = re.sub(r"\s*\(.*?\)", "", comp_name).strip()
+                    dom_match = re.search(r"\b([a-z0-9-]+\.(?:com|in|io|co|net|org|app|dev|ai))\b", snippet.lower())
+                    dom = dom_match.group(1) if dom_match else None
+                    if dom and dom not in seen_domains and not any(s in dom for s in skip_domains):
+                        seen_domains.add(dom)
+                        candidates.append({
+                            "company_name": comp_name or name.title(),
+                            "domain": dom,
+                            "website": f"https://{dom}",
+                            "logo": f"https://www.google.com/s2/favicons?domain={dom}&sz=128",
+                            "description": f"LinkedIn: {snippet[:150]}",
+                            "source": "linkedin",
+                        })
+    except Exception:
+        pass
+
+    return candidates
+
+
 async def resolve_company(company_name: str) -> dict:
     """Resolve company name to domain/website using public sources only."""
     name = company_name.strip()
@@ -44,79 +166,13 @@ async def resolve_company(company_name: str) -> dict:
         "sources": [],
     }
 
-    # 1) Clearbit autocomplete (public, no API key)
-    try:
-        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
-            resp = await client.get(
-                "https://autocomplete.clearbit.com/v1/companies/suggest",
-                params={"query": name},
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, list) and data:
-                    best = data[0]
-                    domain = _normalize_domain(best.get("domain") or "")
-                    if domain:
-                        result["domain"] = domain
-                        result["website"] = f"https://{domain}"
-                        result["logo"] = best.get("logo")
-                        result["company_name"] = best.get("name") or name
-                        result["sources"].append("clearbit")
-                        return result
-    except Exception:
-        pass
-
-    # 2) DuckDuckGo web search for official site
-    try:
-        with DDGS() as ddgs:
-            hits = list(
-                ddgs.text(
-                    f"{name} official website",
-                    max_results=8,
-                )
-            )
-        skip = (
-            "linkedin.com",
-            "facebook.com",
-            "twitter.com",
-            "x.com",
-            "instagram.com",
-            "youtube.com",
-            "crunchbase.com",
-            "bloomberg.com",
-            "wikipedia.org",
-            "glassdoor.com",
-            "indeed.com",
-            "zoominfo.com",
-            "apollo.io",
-            "rocketreach.co",
-            "yelp.com",
-        )
-        for hit in hits:
-            href = hit.get("href") or hit.get("link") or ""
-            domain = _normalize_domain(href)
-            if not domain:
-                continue
-            if any(s in domain for s in skip):
-                continue
-            # Prefer domains that resemble company name
-            slug = re.sub(r"[^a-z0-9]", "", name.lower())
-            host_slug = re.sub(r"[^a-z0-9]", "", domain.split(".")[0])
-            if slug and (slug[:4] in host_slug or host_slug[:4] in slug or len(slug) < 4):
-                result["domain"] = domain
-                result["website"] = f"https://{domain}"
-                result["sources"].append("duckduckgo")
-                return result
-        # Fallback: first non-skipped domain
-        for hit in hits:
-            href = hit.get("href") or hit.get("link") or ""
-            domain = _normalize_domain(href)
-            if domain and not any(s in domain for s in skip):
-                result["domain"] = domain
-                result["website"] = f"https://{domain}"
-                result["sources"].append("duckduckgo")
-                return result
-    except Exception:
-        pass
+    candidates = await search_company_candidates(name)
+    if candidates:
+        best = candidates[0]
+        result["domain"] = best["domain"]
+        result["website"] = best["website"]
+        result["logo"] = best.get("logo")
+        result["company_name"] = best["company_name"]
+        result["sources"].append(best.get("source", "search"))
 
     return result

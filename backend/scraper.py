@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from .enrichment import hunter_hr_search
 from .models import Contact
 from .resolver import resolve_company
@@ -81,12 +83,22 @@ async def find_employee_contacts(
     hunter_api_keys: list[str] | None = None,
     active_key_index: int = 0,
     key_states: list[dict] | None = None,
+    target_domain: str | None = None,
 ) -> dict:
     enrichment_errors: list[str] = []
-    resolved = await resolve_company(company_name)
-    company = resolved.get("company_name") or company_name.strip()
-    domain = resolved.get("domain")
-    website = resolved.get("website")
+    if target_domain and target_domain.strip():
+        domain = target_domain.strip().lower()
+        if domain.startswith("http://") or domain.startswith("https://"):
+            domain = urlparse(domain).netloc or domain
+        if domain.startswith("www."):
+            domain = domain[4:]
+        website = f"https://{domain}"
+        company = company_name.strip()
+    else:
+        resolved = await resolve_company(company_name)
+        company = resolved.get("company_name") or company_name.strip()
+        domain = resolved.get("domain")
+        website = resolved.get("website")
 
     people, hunter_err, pool, meta = await hunter_hr_search(
         domain=domain or "",
