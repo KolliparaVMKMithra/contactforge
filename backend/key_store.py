@@ -22,18 +22,43 @@ def _empty_store() -> dict:
 
 def load_user_keys(email: str) -> dict:
     path = _user_path(email)
-    if not path.exists():
-        return _empty_store()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("keys"), list):
-            return {
-                "keys": data.get("keys", [])[:MAX_KEYS],
-                "activeKeyId": data.get("activeKeyId"),
-            }
-    except (json.JSONDecodeError, OSError):
-        pass
-    return _empty_store()
+    store = _empty_store()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("keys"), list):
+                store = {
+                    "keys": data.get("keys", [])[:MAX_KEYS],
+                    "activeKeyId": data.get("activeKeyId"),
+                }
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if not store.get("keys"):
+        from .enrichment import _env_hunter_keys
+        env_keys = _env_hunter_keys()
+        if env_keys:
+            seeded = [
+                {
+                    "id": f"k_env_{i}",
+                    "key": k,
+                    "label": f"Env Key {i+1}",
+                    "status": "active" if i == 0 else "standby",
+                    "creditsAvailable": None,
+                    "creditsUsed": None,
+                    "resetDate": None,
+                    "requestsMade": 0,
+                    "error": None,
+                }
+                for i, k in enumerate(env_keys)
+            ]
+            store = {"keys": seeded, "activeKeyId": seeded[0]["id"]}
+            try:
+                save_user_keys(email, store)
+            except Exception:
+                pass
+
+    return store
 
 
 def save_user_keys(email: str, store: dict) -> dict:
@@ -47,6 +72,7 @@ def save_user_keys(email: str, store: dict) -> dict:
         "keys": keys,
         "activeKeyId": store.get("activeKeyId"),
     }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     path = _user_path(email)
     path.write_text(json.dumps(cleaned, indent=2), encoding="utf-8")
     return cleaned

@@ -84,21 +84,33 @@ async function syncKeysFromServer() {
     }
     if (!res.ok) return false;
 
-    const server = normalizeStore(await res.json());
-    if (server.keys.length) {
-      keyStoreCache = server;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(keyStoreCache));
-      return true;
+    const serverStore = normalizeStore(await res.json());
+    const localStore = loadLocalKeyStoreOnly();
+
+    const mergedKeys = [...serverStore.keys];
+    const serverKeyStrings = new Set(serverStore.keys.map((k) => k.key));
+
+    let localAddedCount = 0;
+    for (const lKey of localStore.keys) {
+      if (lKey && lKey.key && !serverKeyStrings.has(lKey.key)) {
+        mergedKeys.push(lKey);
+        serverKeyStrings.add(lKey.key);
+        localAddedCount++;
+      }
     }
 
-    const local = loadLocalKeyStoreOnly();
-    if (local.keys.length) {
-      keyStoreCache = local;
-      await flushKeyStore();
-      return true;
+    const mergedStore = {
+      keys: mergedKeys,
+      activeKeyId: serverStore.activeKeyId || localStore.activeKeyId || (mergedKeys[0]?.id ?? null),
+    };
+
+    keyStoreCache = normalizeStore(mergedStore);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(keyStoreCache));
+
+    if (localAddedCount > 0 || serverStore.keys.length < mergedKeys.length) {
+      await persistKeyStoreToServer(keyStoreCache);
     }
 
-    keyStoreCache = server;
     return true;
   } catch (_) {
     const local = loadLocalKeyStoreOnly();
@@ -525,8 +537,17 @@ function bindDockControls() {
     if (addKey(key, label)) {
       keyInput.value = "";
       if (labelInput) labelInput.value = "";
-      await flushKeyStore();
+      const savedOk = await flushKeyStore();
+      if (savedOk) {
+        setDockRotationNote("Key saved and synced to your server account!");
+      } else {
+        setDockRotationNote("Key saved locally");
+      }
       checkAllKeys({ silent: true });
+      setTimeout(() => setDockRotationNote(""), 5000);
+    } else {
+      setDockRotationNote("This API key is already in your list.");
+      setTimeout(() => setDockRotationNote(""), 4000);
     }
   });
 
@@ -536,10 +557,14 @@ function bindDockControls() {
     const added = bulkAddKeys(textarea?.value || "");
     if (textarea) textarea.value = "";
     if (added > 0) {
-      await flushKeyStore();
-      setDockRotationNote(`Imported ${added} API key${added === 1 ? "" : "s"} — synced to your account`);
+      const savedOk = await flushKeyStore();
+      if (savedOk) {
+        setDockRotationNote(`Imported ${added} API key${added === 1 ? "" : "s"} — saved & synced to server`);
+      } else {
+        setDockRotationNote(`Imported ${added} API key${added === 1 ? "" : "s"} locally`);
+      }
       checkAllKeys({ silent: true });
-      setTimeout(() => setDockRotationNote(""), 4000);
+      setTimeout(() => setDockRotationNote(""), 5000);
     } else {
       setDockRotationNote("No new keys found to import");
       setTimeout(() => setDockRotationNote(""), 4000);

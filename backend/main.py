@@ -12,7 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import AUTH_SECRET_KEY, is_public_path, verify_credentials
-from .enrichment import check_hunter_keys, enrichment_status
+from .enrichment import _env_hunter_keys, check_hunter_keys, enrichment_status
 from .key_store import load_user_keys, save_user_keys
 from .models import CheckKeysRequest, KeyStorePayload, LoginRequest, SearchRequest, SearchResponse
 from .scraper import find_employee_contacts
@@ -121,16 +121,34 @@ async def api_check_keys(req: CheckKeysRequest):
 
 
 @app.post("/api/search", response_model=SearchResponse)
-async def search(req: SearchRequest):
+async def search(req: SearchRequest, request: Request):
     name = req.company_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Company name is required")
 
-    keys = [k.strip() for k in req.hunter_api_keys if k.strip()]
-    if not keys:
+    req_keys = [k.strip() for k in req.hunter_api_keys if k.strip()]
+
+    email = request.session.get("email")
+    stored_keys = []
+    if email:
+        user_store = load_user_keys(email)
+        for entry in user_store.get("keys", []):
+            if isinstance(entry, dict) and entry.get("key"):
+                k = entry["key"].strip()
+                if k and k not in stored_keys:
+                    stored_keys.append(k)
+
+    env_keys = _env_hunter_keys()
+
+    combined_keys = []
+    for k in req_keys + stored_keys + env_keys:
+        if k and k not in combined_keys:
+            combined_keys.append(k)
+
+    if not combined_keys:
         raise HTTPException(
             status_code=400,
-            detail="Add at least one Hunter.io API key in Manage keys at the bottom.",
+            detail="Add at least one Hunter.io API key in Manage keys at the bottom or set HUNTER_API_KEY environment variable.",
         )
 
     try:
@@ -139,7 +157,7 @@ async def search(req: SearchRequest):
             find_employee_contacts(
                 name,
                 max_results=req.max_results,
-                hunter_api_keys=keys,
+                hunter_api_keys=combined_keys,
                 active_key_index=req.active_key_index,
                 key_states=key_states,
             ),

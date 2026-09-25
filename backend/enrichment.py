@@ -63,10 +63,15 @@ HR_TITLE_PATTERN = re.compile(
 
 
 def _env_hunter_keys() -> list[str]:
-    raw = os.getenv("HUNTER_API_KEY", "").strip()
-    if not raw:
-        return []
-    return [k.strip() for k in raw.replace(";", ",").split(",") if k.strip()]
+    keys: list[str] = []
+    for var in ("HUNTER_API_KEY", "HUNTER_API_KEYS", "HUNTER_KEYS"):
+        raw = os.getenv(var, "").strip()
+        if raw:
+            for k in re.split(r"[\n,;]+", raw):
+                k = k.strip()
+                if k and k not in keys:
+                    keys.append(k)
+    return keys
 
 
 def enrichment_status() -> dict:
