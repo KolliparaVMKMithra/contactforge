@@ -83,7 +83,7 @@ body.dock-expanded {
   margin: 0 auto;
   padding: 28px 24px 8px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
@@ -91,16 +91,14 @@ body.dock-expanded {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
 }
 
 .brand-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, var(--accent), #1aa38f);
-  box-shadow: 0 0 0 4px rgba(13, 122, 111, 0.15);
-  animation: pulse 2.4s ease-in-out infinite;
+    width: 100px;
+    height: 100px;
+    object-fit: contain;
+    flex-shrink: 0;
 }
 
 @keyframes pulse {
@@ -109,17 +107,29 @@ body.dock-expanded {
 }
 
 .brand-name {
-  font-family: var(--display);
-  font-size: 1.55rem;
-  letter-spacing: 0.01em;
+    font-family: var(--display);
+    font-size: 3rem;
+    font-weight: 500;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    white-space: nowrap;
 }
+
+.brand-contact {
+    color: #102b26;
+}
+
+.brand-forge {
+    color: #3b9f8c;
+}
+
 
 .brand-tag {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-}
-
+    margin: -20px 0 0 100px;
+    color: var(--ink-soft);
+    font-size: 0.9rem;
+    letter-spacing: 0.01em;
+} 
 .shell {
   max-width: 1100px;
   margin: 0 auto;
@@ -811,9 +821,9 @@ tbody tr:hover {
 
 .topbar-main {
   display: flex;
-  align-items: baseline;
-  gap: 16px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
 }
 
 .btn-logout {
