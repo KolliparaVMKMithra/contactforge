@@ -162,15 +162,16 @@ async function downloadExcel(contacts) {
   }
 
   const rows = contacts.map((c) => ({
-    Name: c.name || "",
     "Company name": c.company || "",
+    Name: c.name || "",
     Email: c.email || "",
+    Designation: c.designation || "",
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: ["Name", "Company name", "Email"],
+    header: ["Company name", "Name", "Email", "Designation"],
   });
-  worksheet["!cols"] = [{ wch: 28 }, { wch: 24 }, { wch: 36 }];
+  worksheet["!cols"] = [{ wch: 24 }, { wch: 28 }, { wch: 36 }, { wch: 30 }];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Contacts");
