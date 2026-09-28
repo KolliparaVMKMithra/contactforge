@@ -211,41 +211,38 @@ function setDockRotationNote(message) {
 
 function renderKeyDropdown() {
   const store = loadKeyStore();
-  const dropdown = document.getElementById("key-dropdown");
+  const trigger = document.getElementById("key-dropdown-trigger");
+  const currentEl = document.getElementById("key-picker-current");
+  const menu = document.getElementById("key-picker-menu");
   const countEl = document.getElementById("dock-key-count");
-  if (!dropdown) return;
 
   autoSelectBestKey(store);
   const active = getActiveKey(store);
+  const labelFor = (key, index) => {
+    const credits = key.creditsAvailable != null ? `${key.creditsAvailable} left` : isCheckingCredits ? "\u2026" : "?";
+    const status = key.status === "exhausted" ? "exhausted" : key.status === "invalid" ? "invalid" : credits;
+    return `${key.label || `Key ${index + 1}`} (${maskKey(key.key)}) \u2014 ${status}`;
+  };
 
   if (countEl) {
-    const usable = store.keys.filter((k) => isKeyUsable(k)).length;
-    const poolCredits = store.keys.reduce((sum, k) => sum + (k.creditsAvailable ?? 0), 0);
-    const poolLabel = poolCredits > 0 ? ` · ${poolCredits} total credits` : "";
-    countEl.textContent = `${store.keys.length} keys · ${usable} available${poolLabel}`;
+    const usable = store.keys.filter((key) => isKeyUsable(key)).length;
+    const poolCredits = store.keys.reduce((sum, key) => sum + (key.creditsAvailable ?? 0), 0);
+    const poolLabel = poolCredits > 0 ? ` \u00b7 ${poolCredits} total credits` : "";
+    countEl.textContent = `${store.keys.length} keys \u00b7 ${usable} available${poolLabel}`;
   }
 
-  if (!store.keys.length) {
-    dropdown.innerHTML = `<option value="">No keys — open Manage keys</option>`;
-    dropdown.disabled = true;
-    return;
+  if (currentEl) currentEl.textContent = active ? labelFor(active, store.keys.indexOf(active)) : "No API keys saved";
+  if (trigger) trigger.disabled = !store.keys.length;
+  if (menu) {
+    menu.innerHTML = store.keys.map((key, index) => `
+      <div class="key-picker-row">
+        <button type="button" class="key-picker-option" aria-pressed="${key.id === active?.id}" data-select-key="${escapeHtml(key.id)}">
+          <span>${escapeHtml(labelFor(key, index))}</span>${key.id === active?.id ? '<span class="key-picker-active">Active</span>' : ""}
+        </button>
+        <button type="button" class="key-picker-delete" data-delete-key="${escapeHtml(key.id)}" aria-label="Delete ${escapeHtml(key.label || `Key ${index + 1}`)}" title="Delete key">Delete</button>
+      </div>
+    `).join("");
   }
-
-  dropdown.disabled = false;
-  dropdown.innerHTML = store.keys
-    .map((k, index) => {
-      const credits =
-        k.creditsAvailable != null ? `${k.creditsAvailable} left` : isCheckingCredits ? "…" : "?";
-      const status =
-        k.status === "exhausted"
-          ? "exhausted"
-          : k.status === "invalid"
-            ? "invalid"
-            : credits;
-      const label = `${k.label || `Key ${index + 1}`} (${maskKey(k.key)}) — ${status}`;
-      return `<option value="${k.id}" ${k.id === active?.id ? "selected" : ""}>${escapeHtml(label)}</option>`;
-    })
-    .join("");
 }
 
 function updateLiveCreditsDisplay() {
@@ -501,21 +498,60 @@ async function checkAllKeys({ silent = false } = {}) {
   }
 }
 
+async function removeKeyById(keyId) {
+  const store = loadKeyStore();
+  if (!store.keys.some((key) => key.id === keyId)) return;
+  store.keys = store.keys.filter((key) => key.id !== keyId);
+  if (store.activeKeyId === keyId) {
+    const next = store.keys.find((key) => isKeyUsable(key)) || store.keys[0];
+    store.activeKeyId = next?.id || null;
+    if (next) next.status = "active";
+  }
+  saveKeyStore(store);
+  updateLiveCreditsDisplay();
+  const savedOk = await flushKeyStore();
+  setDockRotationNote(savedOk ? "Key deleted and synced to your server account." : "Key deleted locally; server sync failed.");
+  if (store.keys.length) checkAllKeys({ silent: true });
+  setTimeout(() => setDockRotationNote(""), 5000);
+}
 function bindDockControls() {
-  const dropdown = document.getElementById("key-dropdown");
-  dropdown?.addEventListener("change", () => {
+  const picker = document.getElementById("key-picker");
+  const pickerTrigger = document.getElementById("key-dropdown-trigger");
+  const pickerMenu = document.getElementById("key-picker-menu");
+  pickerTrigger?.addEventListener("click", () => {
+    const open = pickerMenu?.hidden;
+    if (pickerMenu) pickerMenu.hidden = !open;
+    pickerTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  pickerMenu?.addEventListener("click", (event) => {
+    const deleteButton = event.target.closest("[data-delete-key]");
+    if (deleteButton) {
+      event.stopPropagation();
+      removeKeyById(deleteButton.dataset.deleteKey);
+      return;
+    }
+    const option = event.target.closest("[data-select-key]");
+    if (!option) return;
     const store = loadKeyStore();
-    const id = dropdown.value;
-    if (!id) return;
-    store.activeKeyId = id;
-    store.keys.forEach((k) => {
-      if (k.id === id) k.status = "active";
-      else if (k.status === "active") k.status = "standby";
+    const selected = store.keys.find((key) => key.id === option.dataset.selectKey);
+    if (!selected) return;
+    store.activeKeyId = selected.id;
+    store.keys.forEach((key) => {
+      key.status = key.id === selected.id ? "active" : (key.status === "active" ? "standby" : key.status);
     });
     saveKeyStore(store);
     updateLiveCreditsDisplay();
     checkAllKeys({ silent: true });
+    pickerMenu.hidden = true;
+    pickerTrigger.setAttribute("aria-expanded", "false");
   });
+  document.addEventListener("click", (event) => {
+    if (picker && !picker.contains(event.target) && pickerMenu && !pickerMenu.hidden) {
+      pickerMenu.hidden = true;
+      pickerTrigger?.setAttribute("aria-expanded", "false");
+    }
+  });
+
 
   const toggleBtn = document.getElementById("dock-toggle-btn");
   const panel = document.getElementById("api-dock-panel");

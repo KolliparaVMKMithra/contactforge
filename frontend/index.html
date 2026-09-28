@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260928-key-menu" />
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -128,8 +128,13 @@
     <div class="api-dock-bar">
       <div class="api-dock-left">
         <span class="api-dock-title">Hunter API</span>
-        <label class="sr-only" for="key-dropdown">Select API key</label>
-        <select id="key-dropdown" class="key-dropdown" title="All saved Hunter API keys"></select>
+        <label class="sr-only" for="key-dropdown-trigger">Select API key</label>
+        <div class="key-picker" id="key-picker">
+          <button type="button" id="key-dropdown-trigger" class="key-picker-trigger" aria-haspopup="listbox" aria-expanded="false">
+            <span id="key-picker-current">No keys</span><span class="key-picker-chevron" aria-hidden="true"></span>
+          </button>
+          <div id="key-picker-menu" class="key-picker-menu" role="listbox" aria-label="Hunter API keys" hidden></div>
+        </div>
         <span id="dock-key-count" class="dock-key-count">0 keys</span>
       </div>
 
@@ -182,7 +187,7 @@
 
   <script src="/static/default-keys.js"></script>
   <script src="/static/default-keys.local.js" onerror="void 0"></script>
-  <script src="/static/keys.js"></script>
+  <script src="/static/keys.js?v=20260928-key-menu"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
