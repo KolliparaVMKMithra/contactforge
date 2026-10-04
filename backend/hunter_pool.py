@@ -172,25 +172,33 @@ def _suffix(key: str) -> str:
 
 async def fetch_hunter_account(api_key: str) -> dict:
     """Return Hunter account/credit info for a key."""
-    async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
-        resp = await client.get(
-            "https://api.hunter.io/v2/account",
-            params={"api_key": api_key},
-        )
-        if resp.status_code == 401:
-            return {"valid": False, "error": "Invalid API key"}
-        if resp.status_code != 200:
-            return {"valid": False, "error": f"HTTP {resp.status_code}"}
-        data = (resp.json() or {}).get("data") or {}
-        requests = data.get("requests") or {}
-        searches = requests.get("searches") or {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
+            resp = await client.get(
+                "https://api.hunter.io/v2/account",
+                params={"api_key": api_key},
+            )
+            if resp.status_code == 401:
+                return {"valid": False, "error": "Invalid API key"}
+            if resp.status_code != 200:
+                return {"valid": False, "error": f"HTTP {resp.status_code}"}
+            data = (resp.json() or {}).get("data") or {}
+            requests = data.get("requests") or {}
+            searches = requests.get("searches") or {}
+            return {
+                "valid": True,
+                "email": data.get("email"),
+                "plan_name": data.get("plan_name"),
+                "credits_available": searches.get("available"),
+                "credits_used": searches.get("used"),
+                "reset_date": searches.get("resets_at"),
+            }
+    except Exception as exc:
         return {
             "valid": True,
-            "email": data.get("email"),
-            "plan_name": data.get("plan_name"),
-            "credits_available": searches.get("available"),
-            "credits_used": searches.get("used"),
-            "reset_date": searches.get("resets_at"),
+            "error": str(exc),
+            "credits_available": None,
+            "credits_used": None,
         }
 
 
