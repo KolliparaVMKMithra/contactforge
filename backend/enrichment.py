@@ -14,33 +14,19 @@ from .resolver import USER_AGENT
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env", override=True)
 
-# Hunter queries focused on HR / leadership / senior talent teams
+# Budget-efficient Hunter queries: exactly 1 targeted HR search and 1 fallback domain search
+# to ensure 1 API key lasts for 15-25 companies instead of burning out on 1 company.
 HUNTER_HR_QUERIES: list[dict] = [
     {"department": "hr"},
-    {"department": "hr", "seniority": "executive"},
-    {"department": "hr", "seniority": "senior"},
-    {"department": "management", "seniority": "executive"},
-    {"seniority": "executive"},
-    {"seniority": "senior"},
 ]
 
-# Broader queries when HR results are not enough
+# Broader general company search only when HR results are empty/thin
 HUNTER_FALLBACK_QUERIES: list[dict] = [
     {},  # all departments
-    {"department": "executive"},
-    {"department": "management"},
-    {"department": "it"},
-    {"department": "sales"},
-    {"department": "marketing"},
-    {"department": "finance"},
-    {"department": "operations"},
-    {"seniority": "executive"},
-    {"seniority": "senior"},
-    {"seniority": "junior"},
 ]
 
 # Run fallback if HR pass finds fewer than this many contacts
-HR_MIN_BEFORE_FALLBACK = 5
+HR_MIN_BEFORE_FALLBACK = 3
 
 HR_TITLE_PATTERN = re.compile(
     r"(?i)\b("
@@ -153,12 +139,13 @@ async def _hunter_domain_query(
     key_index: int,
     department: str | None = None,
     seniority: str | None = None,
+    limit: int = 15,
     hr_only: bool = True,
 ) -> tuple[list[dict], str | None]:
     params: dict = {
         "domain": domain,
         "api_key": api_key,
-        "limit": 10,
+        "limit": limit,
         "type": "personal",
     }
     if department:
@@ -202,7 +189,7 @@ async def _run_hunter_queries(
     hr_only: bool,
     errors: list[str],
 ) -> None:
-    """Execute a batch of Hunter queries, rotating keys on limit errors."""
+    """Execute Hunter queries (budget-aware: 1 credit per query), rotating keys on limit errors."""
     for query in queries:
         if len(people) >= want:
             break
@@ -225,6 +212,7 @@ async def _run_hunter_queries(
             idx,
             department=query.get("department"),
             seniority=query.get("seniority"),
+            limit=min(max(want, 10), 20),
             hr_only=hr_only,
         )
 
@@ -243,6 +231,7 @@ async def _run_hunter_queries(
                     rotated[0],
                     department=query.get("department"),
                     seniority=query.get("seniority"),
+                    limit=min(max(want, 10), 20),
                     hr_only=hr_only,
                 )
             else:
@@ -274,6 +263,7 @@ async def hunter_hr_search(
 ) -> tuple[list[dict], str | None, HunterKeyPool | None, dict]:
     """
     HR-focused Hunter search with fallback to general company employees.
+    Uses at most 1 to 2 API queries per company so 1 key lasts for 15-25 companies.
     Returns (people, error_message, key_pool_state, meta).
     """
     keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
@@ -297,7 +287,7 @@ async def hunter_hr_search(
     errors: list[str] = []
 
     async with httpx.AsyncClient(timeout=20.0, headers={"User-Agent": USER_AGENT}) as client:
-        # Pass 1: HR / leadership / talent acquisition
+        # Pass 1: Targeted HR / talent / leadership search (1 credit)
         await _run_hunter_queries(
             client, pool, domain, company,
             HUNTER_HR_QUERIES, seen, people, want,
@@ -306,15 +296,8 @@ async def hunter_hr_search(
 
         hr_count = sum(1 for p in people if p.get("is_hr"))
 
-        # Pass 2: general employees if HR results are thin
-        if len(people) < want and hr_count < HR_MIN_BEFORE_FALLBACK:
-            await _run_hunter_queries(
-                client, pool, domain, company,
-                HUNTER_FALLBACK_QUERIES, seen, people, want,
-                hr_only=False, errors=errors,
-            )
-        elif len(people) < want:
-            # Have some HR but not enough — still top up with general contacts
+        # Pass 2: Only fallback to general employee search if HR results are thin/empty (1 credit)
+        if hr_count < HR_MIN_BEFORE_FALLBACK:
             await _run_hunter_queries(
                 client, pool, domain, company,
                 HUNTER_FALLBACK_QUERIES, seen, people, want,
