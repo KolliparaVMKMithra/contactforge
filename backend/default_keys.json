@@ -1,5 +1,4 @@
-// Default Hunter API keys synced from server
-window.ContactForgeDefaultKeys = [
+[
   "46d05b7a69dceab7212d161cf36cdb8bd3e6d42d",
   "b954bd6f401622575db4b060804df462febc00c5",
   "468c6f4c64b16412ea86abc9472be8d1ca2b7018",
@@ -39,4 +38,4 @@ window.ContactForgeDefaultKeys = [
   "abc1234567890123456789012345678901234",
   "738b0b007e9239215805fc95c2a2d3a4f2850fbe",
   "cfd575ba40a94bb454f38bde9b4cc2669288b722"
-];
+]

@@ -125,15 +125,44 @@
   </footer>
 
   <aside class="api-dock" id="api-dock" aria-label="Hunter API key manager">
+    <!-- Upward Floating Key Selector Popup -->
+    <div id="key-picker-popup" class="key-picker-popup" hidden>
+      <div class="key-picker-popup-header">
+        <div class="key-picker-popup-title">
+          <svg class="icon-key" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-1.5 1.5L14 9l-1.5-1.5L10 10l-1.5-1.5L6 11l-4 4 3 3 4-4 2.5 2.5L14 14l2.5 2.5L19 14l2-2v-4z"/><circle cx="7.5" cy="15.5" r=".5" fill="currentColor"/></svg>
+          <span>Select Active Hunter Key</span>
+        </div>
+        <button type="button" id="key-picker-close" class="btn-icon-close" aria-label="Close key picker">✕</button>
+      </div>
+
+      <div class="key-picker-search-wrap">
+        <input id="key-picker-search" type="search" placeholder="Search by name, key mask, or status…" autocomplete="off" />
+      </div>
+
+      <div class="key-picker-filters">
+        <button type="button" class="key-filter-tab active" data-filter="all">All (<span id="count-all">0</span>)</button>
+        <button type="button" class="key-filter-tab" data-filter="usable">Ready (<span id="count-usable">0</span>)</button>
+        <button type="button" class="key-filter-tab" data-filter="exhausted">Exhausted (<span id="count-exhausted">0</span>)</button>
+      </div>
+
+      <div id="key-picker-list" class="key-picker-list" role="listbox" aria-label="Hunter API keys"></div>
+
+      <div class="key-picker-popup-footer">
+        <span class="auto-rotate-note">Auto-rotates to next key when daily limit is reached</span>
+        <button type="button" id="btn-open-manage-panel" class="btn-link-manage">Manage all keys →</button>
+      </div>
+    </div>
+
+    <!-- Main Bottom Dock Bar -->
     <div class="api-dock-bar">
       <div class="api-dock-left">
         <span class="api-dock-title">Hunter API</span>
-        <label class="sr-only" for="key-dropdown-trigger">Select API key</label>
-        <div class="key-picker" id="key-picker">
-          <button type="button" id="key-dropdown-trigger" class="key-picker-trigger" aria-haspopup="listbox" aria-expanded="false">
-            <span id="key-picker-current">No keys</span><span class="key-picker-chevron" aria-hidden="true"></span>
+        <div class="key-selector-wrap">
+          <button type="button" id="key-dropdown-trigger" class="key-selector-btn" aria-haspopup="dialog" aria-expanded="false">
+            <span class="key-active-badge-dot" id="active-key-dot"></span>
+            <span id="key-picker-current" class="key-current-label">Loading keys…</span>
+            <svg class="key-picker-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
           </button>
-          <div id="key-picker-menu" class="key-picker-menu" role="listbox" aria-label="Hunter API keys" hidden></div>
         </div>
         <span id="dock-key-count" class="dock-key-count">0 keys</span>
       </div>
@@ -154,40 +183,63 @@
       </div>
     </div>
 
+    <!-- Expanded Manage Keys Panel -->
     <div class="api-dock-panel" id="api-dock-panel" hidden>
-      <div class="api-dock-panel-grid">
-        <form id="add-key-form" class="add-key-form" autocomplete="off">
-          <input
-            id="new-key-input"
-            type="password"
-            placeholder="Paste one Hunter API key…"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <input id="new-key-label" type="text" placeholder="Label (optional)" maxlength="40" />
-          <button type="submit" class="btn-secondary">Add key</button>
-        </form>
-
-        <form id="bulk-key-form" class="bulk-key-form" autocomplete="off">
-          <label for="bulk-keys-input">Bulk import (one key per line)</label>
-          <textarea
-            id="bulk-keys-input"
-            rows="4"
-            placeholder="Paste multiple Hunter API keys here, one per line…"
-            spellcheck="false"
-          ></textarea>
-          <button type="submit" class="btn-secondary">Import keys</button>
-        </form>
+      <div class="manage-panel-header">
+        <div class="manage-panel-title">
+          <h3>Manage Hunter.io API Keys</h3>
+          <p class="manage-panel-sub">Keys are saved to your account and sync seamlessly across all devices and server reloads.</p>
+        </div>
+        <div class="manage-panel-actions">
+          <button type="button" id="clean-exhausted-btn" class="btn-secondary btn-danger-soft">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+            Clean Exhausted Keys
+          </button>
+        </div>
       </div>
-      <p class="keys-note">
-        Keys are saved to your account and sync across all devices when you sign in. Limits reset daily. When the active key hits its limit, the next available key is used automatically.
-      </p>
+
+      <div class="api-dock-panel-grid">
+        <div class="panel-section">
+          <h4>Add Single Key</h4>
+          <form id="add-key-form" class="add-key-form" autocomplete="off">
+            <input
+              id="new-key-input"
+              type="password"
+              placeholder="Paste Hunter API key…"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            />
+            <input id="new-key-label" type="text" placeholder="Label (optional)" maxlength="40" />
+            <button type="submit" class="btn-secondary">Add key</button>
+          </form>
+
+          <h4 style="margin-top: 18px;">Bulk Import</h4>
+          <form id="bulk-key-form" class="bulk-key-form" autocomplete="off">
+            <textarea
+              id="bulk-keys-input"
+              rows="3"
+              placeholder="Paste multiple Hunter API keys here (one key per line or comma-separated)…"
+              spellcheck="false"
+            ></textarea>
+            <button type="submit" class="btn-secondary">Import all keys</button>
+          </form>
+        </div>
+
+        <div class="panel-section">
+          <div class="keys-table-header">
+            <h4>All Keys (<span id="table-keys-count">0</span>)</h4>
+            <input id="table-keys-filter" type="search" placeholder="Filter keys…" class="table-search-input" />
+          </div>
+          <div id="keys-manage-list" class="keys-manage-list"></div>
+        </div>
+      </div>
     </div>
   </aside>
 
   <script src="/static/default-keys.js"></script>
   <script src="/static/default-keys.local.js" onerror="void 0"></script>
-  <script src="/static/keys.js?v=20260928-key-menu"></script>
+  <script src="/static/keys.js?v=20261010-v2"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
