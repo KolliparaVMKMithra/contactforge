@@ -42,24 +42,187 @@ HUNTER_FALLBACK_QUERIES: list[dict] = [
 # Run fallback if HR pass finds fewer than this many contacts
 HR_MIN_BEFORE_FALLBACK = 5
 
-HR_TITLE_PATTERN = re.compile(
-    r"(?i)\b("
-    r"human\s+resources?|hr\b|people\s+ops|people\s+operations|people\s+team|"
-    r"talent\s+acquisition|talent\s+partner|talent\s+advisor|talent\s+lead|"
-    r"recruit(?:er|ing|ment)?|staffing|hiring|headhunt|"
-    r"chief\s+people|chief\s+human|cpo\b|"
-    r"vp\s+(?:of\s+)?(?:people|hr|human|talent)|"
-    r"vice\s+president\s+(?:of\s+)?(?:people|hr|human|talent)|"
-    r"head\s+of\s+(?:people|hr|human|talent|recruiting|recruitment)|"
-    r"director\s+(?:of\s+)?(?:people|hr|human|talent|recruiting)|"
-    r"hr\s+(?:manager|director|lead|partner|bp|business\s+partner)|"
-    r"hrbp|people\s+(?:manager|director|partner|lead)|"
-    r"founder|co-?founder|"
-    r"ceo\b|cto\b|cfo\b|coo\b|chief\s+(?:executive|technology|financial|operating)|"
-    r"president\b|managing\s+director|"
-    r"senior\s+(?:hr|recruiter|talent|people)"
-    r")\b"
+# Keep the fetch tightly scoped to the roles we actually want to contact.
+# This avoids wasteful API calls on generic manager/team-lead titles.
+TARGET_HR_DESIGNATIONS: tuple[str, ...] = (
+    "campus recruiter",
+    "campus recruitment manager",
+    "campus hiring manager",
+    "campus talent acquisition manager",
+    "university recruiter",
+    "university relations manager",
+    "university relations specialist",
+    "university recruiting lead",
+    "university recruiting manager",
+    "university talent acquisition partner",
+    "university programs manager",
+    "university hiring lead",
+    "campus relations manager",
+    "campus engagement manager",
+    "campus recruitment lead",
+    "graduate recruitment manager",
+    "graduate recruiter",
+    "graduate hiring manager",
+    "early careers recruiter",
+    "early careers manager",
+    "early careers talent acquisition partner",
+    "early talent acquisition manager",
+    "emerging talent recruiter",
+    "emerging talent manager",
+    "chief human resources officer",
+    "chief people officer",
+    "chief talent officer",
+    "chro",
+    "cpo",
+    "vp human resources",
+    "vp talent acquisition",
+    "vice president human resources",
+    "vice president talent acquisition",
+    "vice president recruitment",
+    "director talent acquisition",
+    "director global talent acquisition",
+    "head of talent acquisition",
+    "head of recruitment",
+    "head of talent",
+    "head of people",
+    "head of human resources",
+    "global head of talent acquisition",
+    "regional head talent acquisition",
+    "country head recruitment",
+    "india talent acquisition head",
+    "apac talent acquisition head",
+    "talent acquisition manager",
+    "senior talent acquisition manager",
+    "talent acquisition lead",
+    "talent acquisition team lead",
+    "recruitment manager",
+    "senior recruitment manager",
+    "recruitment lead",
+    "hiring manager",
+    "talent acquisition business partner",
+    "talent acquisition partner",
+    "senior talent partner",
+    "recruitment business partner",
+    "hr business partner",
+    "people business partner",
+    "staffing manager",
+    "resourcing manager",
+    "talent sourcing manager",
+    "talent acquisition operations manager",
+    "talent acquisition specialist",
+    "senior talent acquisition specialist",
+    "talent acquisition consultant",
+    "recruitment specialist",
+    "technical recruiter",
+    "corporate recruiter",
+    "it recruiter",
+    "engineering recruiter",
+    "executive recruiter",
+    "recruitment consultant",
+    "talent sourcer",
+    "senior sourcer",
+    "talent researcher",
+    "recruitment coordinator",
+    "talent acquisition associate",
+    "recruiting coordinator",
+    "staffing specialist",
+    "hr recruiter",
+    "recruitment analyst",
+    "cto",
+    "ceo",
+    "coo",
+    "cio",
 )
+
+BANNED_GENERIC_TITLES = (
+    "team lead",
+    "team leader",
+    "team manager",
+    "project manager",
+    "product manager",
+    "engineering manager",
+    "engineering lead",
+    "tech lead",
+    "technical lead",
+    "technology lead",
+    "software lead",
+    "technical manager",
+    "tech manager",
+    "operations manager",
+    "account manager",
+    "sales manager",
+    "sales",
+    "marketing manager",
+    "general manager",
+    "department manager",
+    "finance manager",
+    "people manager",
+    "engineering",
+    "product",
+    "finance",
+    "marketing",
+    "operations",
+    "risk",
+    "aml",
+    "architecture",
+    "analytics",
+    "governance",
+    "validation",
+    "security",
+    "technology",
+)
+
+
+def _normalize_eligible_title(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = value.lower()
+    normalized = normalized.replace("&", " and ")
+    normalized = normalized.replace("–", " ").replace("—", " ").replace("-", " ")
+    normalized = normalized.replace(" of ", " ")
+    normalized = re.sub(r"[^a-z0-9\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def is_hr_relevant_contact(person: dict) -> bool:
+    """Keep only titles tied to hiring, recruiting, staffing, HR, or executive talent functions."""
+    title = (person.get("designation") or person.get("position") or "") or ""
+    dept = (person.get("department") or "") or ""
+    seniority = (person.get("seniority") or "") or ""
+    blob = _normalize_eligible_title(f"{title} {dept} {seniority}")
+
+    if not blob:
+        return False
+
+    if any(blocked in blob for blocked in BANNED_GENERIC_TITLES):
+        return False
+
+    normalized_targets = tuple(_normalize_eligible_title(t) for t in TARGET_HR_DESIGNATIONS)
+    if any(target in blob for target in normalized_targets):
+        return True
+
+    # Hard reject: do not include non-recruitment departments even if they include director/head words.
+    if any(word in blob for word in ("sales", "engineering", "product", "finance", "marketing", "operations", "risk", "aml", "architecture", "analytics", "governance", "security")):
+        return False
+
+    # Require at least one recruitment-related keyword to keep a result.
+    recruitment_keywords = (
+        "recruit",
+        "talent",
+        "hiring",
+        "campus",
+        "university",
+        "staffing",
+        "sourcing",
+        "human resources",
+        "hr",
+        "people",
+    )
+    if any(keyword in blob for keyword in recruitment_keywords):
+        return True
+
+    return False
 
 
 def _env_hunter_keys() -> list[str]:
@@ -83,26 +246,6 @@ def enrichment_status() -> dict:
         "source": "hunter.io",
         "focus": "HR, talent acquisition, leadership",
     }
-
-
-def is_hr_relevant_contact(person: dict) -> bool:
-    """Keep HR/TA/leadership/senior people contacts."""
-    title = (person.get("designation") or person.get("position") or "") or ""
-    dept = (person.get("department") or "") or ""
-    seniority = (person.get("seniority") or "") or ""
-    blob = f"{title} {dept} {seniority}".strip()
-    if not blob:
-        return True  # keep if Hunter didn't tag title — domain HR query already scoped
-    if HR_TITLE_PATTERN.search(blob):
-        return True
-    if dept.lower() == "hr":
-        return True
-    if seniority.lower() in ("executive", "senior") and any(
-        x in title.lower()
-        for x in ("manager", "director", "head", "lead", "partner", "chief", "vp", "president")
-    ):
-        return True
-    return False
 
 
 def _row_to_person(row: dict, company: str, hr_only: bool = True) -> dict | None:
