@@ -22,6 +22,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 # psycopg2 is only imported when DATABASE_URL is set
 _pg_available: bool | None = None
 
+# Cache the table-creation so we don't run it on every request
+_table_ensured = False
+
 
 def _use_postgres() -> bool:
     global _pg_available
@@ -38,15 +41,24 @@ def _use_postgres() -> bool:
 
 def _pg_connect():
     import psycopg2
-    # Render provides postgres:// but psycopg2 needs postgresql://
     url = DATABASE_URL
+    # psycopg2 needs postgresql:// not postgres://
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
+
+    # Supabase (and most hosted PG) require SSL — add sslmode if missing
+    if "supabase" in url and "sslmode" not in url:
+        sep = "&" if "?" in url else "?"
+        url = url + sep + "sslmode=require"
+
     return psycopg2.connect(url)
 
 
 def _ensure_pg_table() -> None:
-    """Create the key_store table if it doesn't exist."""
+    """Create the key_store table if it doesn't exist (runs once per process)."""
+    global _table_ensured
+    if _table_ensured:
+        return
     conn = _pg_connect()
     try:
         with conn:
@@ -58,6 +70,7 @@ def _ensure_pg_table() -> None:
                         updated_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+        _table_ensured = True
     finally:
         conn.close()
 
