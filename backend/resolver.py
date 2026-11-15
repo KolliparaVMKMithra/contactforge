@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
-from ddgs import DDGS
-
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/128.0.0.0 Safari/537.36"
 )
+
+# Thread pool for running blocking DDGS calls without blocking the event loop
+_ddgs_executor = ThreadPoolExecutor(max_workers=2)
 
 
 def _normalize_domain(url_or_domain: str) -> Optional[str]:
@@ -36,6 +39,43 @@ def _normalize_domain(url_or_domain: str) -> Optional[str]:
 def _clean_title(title: str) -> str:
     cleaned = re.sub(r"\s*[-|•·]\s*(Official Website|LinkedIn|Home|Overview|Contact|About).*$", "", title, flags=re.I).strip()
     return cleaned or title
+
+
+def _ddgs_search_sync(queries: list[tuple[str, int]]) -> list[tuple[str, list[dict]]]:
+    """Run multiple DDGS text searches synchronously (called from thread pool)."""
+    results = []
+    try:
+        from ddgs import DDGS
+        ddgs = DDGS()
+        for query, max_r in queries:
+            try:
+                hits = list(ddgs.text(query, max_results=max_r))
+                results.append((query, hits))
+            except Exception:
+                results.append((query, []))
+    except Exception:
+        for query, _ in queries:
+            results.append((query, []))
+    return results
+
+
+async def _ddgs_search(name: str) -> tuple[list[dict], list[dict]]:
+    """Run DDGS searches in thread pool to avoid blocking and crashes."""
+    loop = asyncio.get_event_loop()
+    queries = [
+        (f"{name} company official website", 10),
+        (f"{name} site:linkedin.com/company", 5),
+    ]
+    try:
+        all_results = await asyncio.wait_for(
+            loop.run_in_executor(_ddgs_executor, _ddgs_search_sync, queries),
+            timeout=12.0,
+        )
+        web_hits = all_results[0][1] if all_results else []
+        li_hits = all_results[1][1] if len(all_results) > 1 else []
+        return web_hits, li_hits
+    except (asyncio.TimeoutError, Exception):
+        return [], []
 
 
 async def search_company_candidates(query: str) -> list[dict]:
@@ -106,51 +146,47 @@ async def search_company_candidates(query: str) -> list[dict]:
         "github.com",
     )
 
-    try:
-        with DDGS() as ddgs:
-            web_hits = list(ddgs.text(f"{name} company official website", max_results=10))
-            for hit in web_hits:
-                href = hit.get("href") or hit.get("link") or ""
-                dom = _normalize_domain(href)
-                if not dom or dom in seen_domains:
-                    continue
-                if any(s in dom for s in skip_domains):
-                    continue
+    web_hits, li_hits = await _ddgs_search(name)
 
-                title = _clean_title(hit.get("title") or name.title())
-                snippet = hit.get("body") or hit.get("snippet") or f"Official website: {dom}"
+    for hit in web_hits:
+        href = hit.get("href") or hit.get("link") or ""
+        dom = _normalize_domain(href)
+        if not dom or dom in seen_domains:
+            continue
+        if any(s in dom for s in skip_domains):
+            continue
+
+        title = _clean_title(hit.get("title") or name.title())
+        snippet = hit.get("body") or hit.get("snippet") or f"Official website: {dom}"
+        seen_domains.add(dom)
+        candidates.append({
+            "company_name": title,
+            "domain": dom,
+            "website": f"https://{dom}",
+            "logo": f"https://www.google.com/s2/favicons?domain={dom}&sz=128",
+            "description": snippet[:180],
+            "source": "duckduckgo",
+        })
+
+    for hit in li_hits:
+        href = hit.get("href") or hit.get("link") or ""
+        title = hit.get("title") or ""
+        snippet = hit.get("body") or hit.get("snippet") or ""
+        if "linkedin.com/company" in href.lower():
+            comp_name = re.sub(r"[-|:•·]\s*LinkedIn.*$", "", title, flags=re.I).strip()
+            comp_name = re.sub(r"\s*\(.*?\)", "", comp_name).strip()
+            dom_match = re.search(r"\b([a-z0-9-]+\.(?:com|in|io|co|net|org|app|dev|ai))\b", snippet.lower())
+            dom = dom_match.group(1) if dom_match else None
+            if dom and dom not in seen_domains and not any(s in dom for s in skip_domains):
                 seen_domains.add(dom)
                 candidates.append({
-                    "company_name": title,
+                    "company_name": comp_name or name.title(),
                     "domain": dom,
                     "website": f"https://{dom}",
                     "logo": f"https://www.google.com/s2/favicons?domain={dom}&sz=128",
-                    "description": snippet[:180],
-                    "source": "duckduckgo",
+                    "description": f"LinkedIn: {snippet[:150]}",
+                    "source": "linkedin",
                 })
-
-            li_hits = list(ddgs.text(f"{name} site:linkedin.com/company", max_results=5))
-            for hit in li_hits:
-                href = hit.get("href") or hit.get("link") or ""
-                title = hit.get("title") or ""
-                snippet = hit.get("body") or hit.get("snippet") or ""
-                if "linkedin.com/company" in href.lower():
-                    comp_name = re.sub(r"[-|:•·]\s*LinkedIn.*$", "", title, flags=re.I).strip()
-                    comp_name = re.sub(r"\s*\(.*?\)", "", comp_name).strip()
-                    dom_match = re.search(r"\b([a-z0-9-]+\.(?:com|in|io|co|net|org|app|dev|ai))\b", snippet.lower())
-                    dom = dom_match.group(1) if dom_match else None
-                    if dom and dom not in seen_domains and not any(s in dom for s in skip_domains):
-                        seen_domains.add(dom)
-                        candidates.append({
-                            "company_name": comp_name or name.title(),
-                            "domain": dom,
-                            "website": f"https://{dom}",
-                            "logo": f"https://www.google.com/s2/favicons?domain={dom}&sz=128",
-                            "description": f"LinkedIn: {snippet[:150]}",
-                            "source": "linkedin",
-                        })
-    except Exception:
-        pass
 
     return candidates
 

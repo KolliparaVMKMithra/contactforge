@@ -94,7 +94,9 @@ async def auth_me(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", **enrichment_status()}
+    from .key_store import _use_postgres, DATABASE_URL
+    db_status = "postgres" if _use_postgres() else ("no_url" if not DATABASE_URL else "psycopg2_missing")
+    return {"status": "ok", "db": db_status, **enrichment_status()}
 
 
 @app.get("/api/hunter/keys")
@@ -189,7 +191,9 @@ async def search(req: SearchRequest, request: Request):
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Search timed out. Try again.")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
+        import traceback
+        tb = traceback.format_exc()
+        raise HTTPException(status_code=500, detail=f"Search failed: {exc}\n\nTrace:\n{tb}") from exc
 
 
 @app.get("/login")
